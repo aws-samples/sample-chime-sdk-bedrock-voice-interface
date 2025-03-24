@@ -1,0 +1,493 @@
+{
+    "Comment": "A description of my state machine",
+    "StartAt": "Init",
+    "States": {
+        "Init": {
+            "Type": "Pass",
+            "Next": "Welcome",
+            "Assign": {
+                "QueueUrl.$": "$.QueueUrl",
+                "Call": {
+                    "SipMediaApplicationId.$": "$.Event.CallDetails.SipMediaApplicationId",
+                    "TransactionId.$": "$.Event.CallDetails.TransactionId",
+                    "CallId.$": "$.Event.CallDetails.Participants[0].CallId"
+                },
+                "Environment": {
+                    "IsProduction": "false",
+                    "BuckectName": "pstn-media-apps",
+                    "TranscriptionsS3Prefix": "transcriptions"
+                }
+            }
+        },
+        "Welcome": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Parameters": {
+                "QueueUrl.$": "$QueueUrl",
+                "MessageBody": {
+                    "SchemaVersion": "1.0",
+                    "Actions": [
+                        {
+                            "Type": "Speak",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "Text": "Welcome to the Generative AI conversational interface demo.",
+                                "Engine": "neural",
+                                "LanguageCode": "en-US",
+                                "TextType": "text",
+                                "VoiceId": "Joanna"
+                            }
+                        }
+                    ],
+                    "TransactionAttributes": {
+                        "WaitToken.$": "$$.Task.Token",
+                        "QueueUrl.$": "$QueueUrl"
+                    }
+                }
+            },
+            "TimeoutSeconds": 60,
+            "Next": "Ask Question",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Check Response",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Ask Question": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Parameters": {
+                "QueueUrl.$": "$QueueUrl",
+                "MessageBody": {
+                    "SchemaVersion": "1.0",
+                    "Actions": [
+                        {
+                            "Type": "Speak",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "Text": "You can ask me any question and I will use a Generative AI model provided by Amazon Bedrock to answer it.",
+                                "Engine": "neural",
+                                "LanguageCode": "en-US",
+                                "TextType": "text",
+                                "VoiceId": "Joanna"
+                            }
+                        },
+                        {
+                            "Type": "PlayAudio",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "ParticipantTag": "LEG-A",
+                                "Repeat": "1",
+                                "AudioSource": {
+                                    "Type": "S3",
+                                    "BucketName.$": "$Environment.BuckectName",
+                                    "Key": "beep.wav"
+                                }
+                            }
+                        }
+                    ],
+                    "TransactionAttributes": {
+                        "WaitToken.$": "$$.Task.Token",
+                        "QueueUrl.$": "$QueueUrl"
+                    }
+                }
+            },
+            "TimeoutSeconds": 60,
+            "Next": "Record Question",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Check Response",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Record Question": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Parameters": {
+                "QueueUrl.$": "$QueueUrl",
+                "MessageBody": {
+                    "SchemaVersion": "1.0",
+                    "Actions": [
+                        {
+                            "Type": "RecordAudio",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "DurationInSeconds": "30",
+                                "SilenceDurationInSeconds": 2,
+                                "SilenceThreshold": 200,
+                                "RecordingTerminators": [
+                                    "#"
+                                ],
+                                "RecordingDestination": {
+                                    "Type": "S3",
+                                    "BucketName.$": "$Environment.BuckectName",
+                                    "Prefix.$": "$Environment.TranscriptionsS3Prefix"
+                                }
+                            }
+                        }
+                    ],
+                    "TransactionAttributes": {
+                        "WaitToken.$": "$$.Task.Token",
+                        "QueueUrl.$": "$QueueUrl"
+                    }
+                }
+            },
+            "TimeoutSeconds": 60,
+            "Next": "Parallel",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Check Response",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Parallel": {
+            "Type": "Parallel",
+            "Next": "Playback Answer",
+            "Branches": [
+                {
+                    "StartAt": "Play Music",
+                    "States": {
+                        "Play Music": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+                            "Parameters": {
+                                "QueueUrl.$": "$QueueUrl",
+                                "MessageBody": {
+                                    "SchemaVersion": "1.0",
+                                    "Actions": [
+                                        {
+                                            "Type": "Speak",
+                                            "Parameters": {
+                                                "CallId.$": "$Call.CallId",
+                                                "Text": "OK, working on it...",
+                                                "Engine": "neural",
+                                                "LanguageCode": "en-US",
+                                                "TextType": "text",
+                                                "VoiceId": "Joanna"
+                                            }
+                                        },
+                                        {
+                                            "Type": "PlayAudio",
+                                            "Parameters": {
+                                                "CallId.$": "$Call.CallId",
+                                                "ParticipantTag": "LEG-A",
+                                                "Repeat": "5",
+                                                "AudioSource": {
+                                                    "Type": "S3",
+                                                    "BucketName.$": "$Environment.BuckectName",
+                                                    "Key": "music-on-hold-cool.wav"
+                                                }
+                                            }
+                                        }
+                                    ],
+                                    "TransactionAttributes": {
+                                        "WaitToken.$": "$$.Task.Token",
+                                        "QueueUrl.$": "$QueueUrl"
+                                    }
+                                }
+                            },
+                            "End": true,
+                            "TimeoutSeconds": 180
+                        }
+                    }
+                },
+                {
+                    "StartAt": "Transcribe Question",
+                    "States": {
+                        "Transcribe Question": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::lambda:invoke",
+                            "OutputPath": "$.Payload",
+                            "Parameters": {
+                                "Payload": {
+                                    "bucket.$": "$.ActionData.RecordingDestination.BucketName",
+                                    "key.$": "$.ActionData.RecordingDestination.Key",
+                                    "language_code": "en-US"
+                                },
+                                "FunctionName": "arn:aws:lambda:us-east-1:471112581412:function:transcribe-realtime-audio-from-s3:$LATEST"
+                            },
+                            "Next": "Bedrock InvokeModel"
+                        },
+                        "Bedrock InvokeModel": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::bedrock:invokeModel",
+                            "Parameters": {
+                                "ModelId": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0",
+                                "Body": {
+                                    "system": [
+                                        {
+                                            "text": "Role: Online Assistant for Customer Phone Calls. Objective: Provide concise and valid answers to customer inquiries on any topic. Guidelines: Conciseness: Aim for the shortest possible response while ensuring the answer is complete and accurate. Clarity: Use clear and straightforward language. Relevance: Ensure the response directly addresses the customer's question. Professionalism: Maintain a polite and helpful tone. Example Responses: Customer: What’s the weather like today? Assistant: Check local weather apps for accurate info. Customer: How do I reset my password? Assistant: Visit our website and use the ‘Forgot Password’ link. Customer: What are your store hours? Assistant: Mon-Sat: 9 AM - 9 PM, Sun: 10 AM - 6 PM.."
+                                        }
+                                    ],
+                                    "messages": [
+                                        {
+                                            "role": "user",
+                                            "content": [
+                                                {
+                                                    "text.$": "$.transcription"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            },
+                            "Next": "UpdateSipMediaApplicationCall"
+                        },
+                        "UpdateSipMediaApplicationCall": {
+                            "Type": "Task",
+                            "Parameters": {
+                                "Arguments": {},
+                                "SipMediaApplicationId.$": "$Call.SipMediaApplicationId",
+                                "TransactionId.$": "$Call.TransactionId"
+                            },
+                            "Resource": "arn:aws:states:::aws-sdk:chimesdkvoice:updateSipMediaApplicationCall",
+                            "End": true,
+                            "ResultPath": null
+                        }
+                    }
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Check Response",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Playback Answer": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Parameters": {
+                "QueueUrl.$": "$QueueUrl",
+                "MessageBody": {
+                    "SchemaVersion": "1.0",
+                    "Actions": [
+                        {
+                            "Type": "Speak",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "Text": "The answer is:",
+                                "Engine": "neural",
+                                "LanguageCode": "en-US",
+                                "TextType": "text",
+                                "VoiceId": "Lupe"
+                            }
+                        },
+                        {
+                            "Type": "Speak",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "Text.$": "$.[1].Body.output.message.content[0].text",
+                                "Engine": "neural",
+                                "LanguageCode": "en-US",
+                                "TextType": "text",
+                                "VoiceId": "Lupe"
+                            }
+                        }
+                    ],
+                    "TransactionAttributes": {
+                        "WaitToken.$": "$$.Task.Token",
+                        "QueueUrl.$": "$QueueUrl"
+                    }
+                }
+            },
+            "TimeoutSeconds": 60,
+            "Next": "Say something loop",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Check Response",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Say something loop": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Parameters": {
+                "QueueUrl.$": "$QueueUrl",
+                "MessageBody": {
+                    "SchemaVersion": "1.0",
+                    "Actions": [
+                        {
+                            "Type": "Speak",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "Text": "You can try another question or just hangup.",
+                                "Engine": "neural",
+                                "LanguageCode": "en-US",
+                                "TextType": "text",
+                                "VoiceId": "Joanna"
+                            }
+                        },
+                        {
+                            "Type": "PlayAudio",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "ParticipantTag": "LEG-A",
+                                "Repeat": "1",
+                                "AudioSource": {
+                                    "Type": "S3",
+                                    "BucketName.$": "$Environment.BuckectName",
+                                    "Key": "beep.wav"
+                                }
+                            }
+                        }
+                    ],
+                    "TransactionAttributes": {
+                        "WaitToken.$": "$$.Task.Token",
+                        "QueueUrl.$": "$QueueUrl"
+                    }
+                }
+            },
+            "TimeoutSeconds": 60,
+            "Next": "Record Question",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Check Response",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Check Response": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.Error.Error",
+                    "StringMatches": "HANGUP",
+                    "Next": "Succeded"
+                },
+                {
+                    "Next": "Play Error and Hangup",
+                    "And": [
+                        {
+                            "Variable": "$.Error.Error",
+                            "IsPresent": true
+                        },
+                        {
+                            "Variable": "$Environment.IsProduction",
+                            "BooleanEquals": false
+                        }
+                    ]
+                }
+            ],
+            "Default": "Hangup"
+        },
+        "Hangup": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Parameters": {
+                "QueueUrl.$": "$QueueUrl",
+                "MessageBody": {
+                    "SchemaVersion": "1.0",
+                    "Actions": [
+                        {
+                            "Type": "Speak",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "Text.$": "States.Format('Reported error caused by: {}', $.Error.Cause)",
+                                "Engine": "neural",
+                                "LanguageCode": "en-US",
+                                "TextType": "text",
+                                "VoiceId": "Joanna"
+                            }
+                        },
+                        {
+                            "Type": "Hangup",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "SipResponseCode": "0"
+                            }
+                        }
+                    ],
+                    "TransactionAttributes": {
+                        "WaitToken.$": "$$.Task.Token",
+                        "QueueUrl.$": "$QueueUrl"
+                    }
+                }
+            },
+            "TimeoutSeconds": 60,
+            "Next": "Reported Error",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Reported Error",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Play Error and Hangup": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+            "Parameters": {
+                "QueueUrl.$": "$QueueUrl",
+                "MessageBody": {
+                    "SchemaVersion": "1.0",
+                    "Actions": [
+                        {
+                            "Type": "Speak",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "Text.$": "States.Format('Reported error caused by: {}', $.Error.Cause)",
+                                "Engine": "neural",
+                                "LanguageCode": "en-US",
+                                "TextType": "text",
+                                "VoiceId": "Joanna"
+                            }
+                        },
+                        {
+                            "Type": "Hangup",
+                            "Parameters": {
+                                "CallId.$": "$Call.CallId",
+                                "SipResponseCode": "0"
+                            }
+                        }
+                    ],
+                    "TransactionAttributes": {
+                        "WaitToken.$": "$$.Task.Token",
+                        "QueueUrl.$": "$QueueUrl"
+                    }
+                }
+            },
+            "TimeoutSeconds": 60,
+            "Next": "Reported Error",
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "Next": "Reported Error",
+                    "ResultPath": "$.Error"
+                }
+            ]
+        },
+        "Reported Error": {
+            "Type": "Fail"
+        },
+        "Succeded": {
+            "Type": "Succeed"
+        }
+    }
+}
